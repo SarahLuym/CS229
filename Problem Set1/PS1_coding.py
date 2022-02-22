@@ -77,7 +77,6 @@ x1_vec = np.linspace(df_x["x1"].min(), df_x["x1"].max(), 2)
 # plt.show()
 
 
-
 # Question 5: Regression for denoising quasar spectra
 # b.i.
 df_train = pd.read_csv("./data/quasar_train.csv")
@@ -97,7 +96,8 @@ y = df_train.head(1).values.T
 x = np.vstack((np.ones(cols_train.shape), cols_train)).T
 
 theta = normal_equation(x, y)
-print(theta) # [2.5134, -9.8112e-4]
+# print(theta)  # [2.5134, -9.8112e-4]
+
 
 # plt.subplots()
 # plt.plot(x[:, 1], x.dot(theta), linewidth=5)
@@ -109,7 +109,8 @@ print(theta) # [2.5134, -9.8112e-4]
 
 # b.ii
 def build_weights(x, x_i, tau=5):
-    return np.diag(np.exp((-(x-x_i)[:, 1]**2) / (2*tau**2)))
+    return np.diag(np.exp((-(x - x_i)[:, 1] ** 2) / (2 * tau ** 2)))
+
 
 pred = []
 for k, x_j in enumerate(x):
@@ -145,4 +146,97 @@ for k, x_j in enumerate(x):
 # plt.show()
 
 
-# c.
+# c.i
+y_train = df_train.values.T
+y_test = df_test.values.T
+
+
+def smoother(x, y_in, tau):
+    pred = np.zeros(y_in.shape)
+    for i in range(y_in.shape[1]):
+        y = y_in[:, i]
+        for j, x_j in enumerate(x):
+            w = build_weights(x, x_j, tau)
+            theta = normal_equation(x, y, w)
+            pred[j][i] = theta.T.dot(x_j[:, np.newaxis]).ravel()[0]
+    return pred
+
+
+y_train_smooth = smoother(x, y_train, 5)
+y_test_smooth = smoother(x, y_test, 5)
+
+
+# c.ii
+def distance(y, y_i):
+    return np.sum((y-y_i[:, np.newaxis])**2, 0)
+
+
+def ker(t):
+    return np.maximum(1-t, 0)
+
+
+def neighbk(distance, k):
+    idx = np.argsort(distance)[:k+1]
+    return idx[: k]
+
+
+def func_regression(x, y_train, y_test, lyman_alpha):
+    # Slice the training and test data according to Lyman-alpha
+    y_train_left = y_train[x < lyman_alpha, :]
+    y_train_right = y_train[x >= lyman_alpha + 100, :]
+    y_test_left = y_test[x < lyman_alpha, :]
+    y_test_right = y_test[x >= lyman_alpha + 100, :]
+
+    # Format our estimate matrix to store results
+    f_hat_left = np.zeros(y_test_left.shape)
+
+    # Compute Distance Matrix
+    for i in range(y_test_right.shape[1]):
+        deltas = distance(y_train_right, y_test_right[:, i])
+        idx = neighbk(deltas, 3)
+        # print idx.shape
+        h = np.max(deltas)
+        weights = ker(deltas / h)[idx]
+
+        f_hat_num = np.sum(y_train_left[:, idx] * weights, 1)
+        f_hat_den = np.sum(weights)
+        f_hat = f_hat_num / f_hat_den
+        f_hat_left[:, i] = f_hat
+    return f_hat_left
+
+
+f_hat_train = func_regression(x[:, 1], y_train_smooth, y_train_smooth, 1200)
+y_train_left = y_train_smooth[x[:, 1] < 1200, :]
+
+# plt.plot(x[x[:, 1] < 1200, 1], f_hat_train)
+# plt.savefig("Q5_c_ii.png")
+# plt.show()
+
+h = np.mean(np.sum((f_hat_train-y_train_left)**2, 0))
+print('Average Error between Training set and Estimate: {:.3f}'.format(h))
+
+
+# c.iii
+f_hat_test = func_regression(x[:, 1], y_train_smooth, y_test_smooth, 1200)
+y_test_left = y_test_smooth[x[:, 1] < 1200, :]
+
+plt.plot(x[x[:, 1] < 1200, 1], f_hat_test)
+plt.savefig("Q5_c_iii_all.png")
+plt.show()
+
+h = np.mean(np.sum((f_hat_test-y_test_left)**2, 0))
+print('Average Error between Test set and Estimate: {:.3f}'.format(h))
+
+# test example 1
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+axes[0].plot(x[x[:, 1] < 1200, 1], f_hat_test[:, 0])
+axes[0].plot(x[x[:, 1] < 1200, 1], y_test_left[:, 0])
+axes[0].set(xlabel="Wavelength", ylabel="Flux""", title="Training Example 1")
+axes[0].legend(["Estimate", "Smoothed Value"])
+
+axes[1].plot(x[x[:, 1] < 1200, 1], f_hat_test[:, 5])
+axes[1].plot(x[x[:, 1] < 1200, 1], y_test_left[:, 5])
+axes[1].set(xlabel="WaveLength", ylabel="Flux", title="Training Example 6")
+axes[1].legend(["Estimate", "Smoothed Value"])
+plt.savefig("Q5_c_iii.png")
+plt.show()
